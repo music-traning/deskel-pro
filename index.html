@@ -4,16 +4,15 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>デスケル Pro (Stripe Payment)</title>
+  <title>デスケル Pro</title>
 
   <link rel="manifest" href="manifest.json">
   <link rel="apple-touch-icon" href="icon.png">
   <meta name="theme-color" content="#000000">
 
-  <script src="https://js.stripe.com/v3/"></script>
-
   <style>
-    /* === 全体設定 === */
+    /* === スタイルはv12と同じです === */
+    /* (省略) */
     body,
     html {
       margin: 0;
@@ -43,7 +42,6 @@
       transition: transform 0.1s ease-out;
     }
 
-    /* 枠線 */
     #overlay-layer {
       position: absolute;
       top: 0;
@@ -74,7 +72,6 @@
       border: 1px solid rgba(0, 0, 0, 0.8);
     }
 
-    /* UI周り */
     .ui-container {
       position: absolute;
       bottom: 0;
@@ -132,7 +129,6 @@
       border-color: white;
     }
 
-    /* ロック状態 */
     button.size-btn.locked {
       color: #aaa;
       background: rgba(30, 30, 30, 0.8);
@@ -155,7 +151,6 @@
       background-color: #eee;
     }
 
-    /* ログインボタン */
     #user-status {
       position: absolute;
       top: 15px;
@@ -189,7 +184,6 @@
       cursor: pointer;
     }
 
-    /* モーダル */
     #modal,
     #save-modal {
       display: none;
@@ -214,7 +208,6 @@
       max-width: 80%;
     }
 
-    /* 決済ボタン (Stripeカラーの紫) */
     .btn-purchase-stripe {
       background: #635bff;
       color: white;
@@ -293,7 +286,7 @@
       <h3>💎 Proプラン</h3>
       <p>このサイズを使用するには<br>有料版への登録が必要です。</p>
 
-      <button class="btn-purchase-stripe" onclick="startStripeCheckout()">
+      <button class="btn-purchase-stripe" onclick="startPaymentLink()">
         ¥300で購入する<br><span style="font-size:10px; opacity:0.8;">(Stripe決済画面へ移動します)</span>
       </button>
 
@@ -321,10 +314,9 @@
     import { getFirestore, doc, setDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-firestore.js";
 
     // ==========================================
-    // ★ここにあなたのStripe情報を入力してください★
+    // ★決済リンクのURLを貼り付けてください★
     // ==========================================
-    const STRIPE_PUBLIC_KEY = "pk_test_51SY9eUHNwKy1YooCBCl8mWkplg1n1y9TjsLNI8XFdydQYUi8daKjKzq710C9u4XsMp11cZHXCBRp8VsbiC6TKskl00xXdMFKCx";
-    const STRIPE_PRICE_ID = "price_1SYATBHNwKy1YooCex3Z5ZeC";
+    const PAYMENT_LINK_URL = "https://buy.stripe.com/test_28E14ncEzbizeW94M6dby01"; // 例: https://buy.stripe.com/test_123abc456def
     // ==========================================
 
     // Firebase設定
@@ -342,11 +334,8 @@
     const db = getFirestore(app);
     const provider = new GoogleAuthProvider();
 
-    // Stripeの準備
-    const stripePromise = Stripe(STRIPE_PUBLIC_KEY);
-
     let isUserPremium = false;
-    window.currentUser = null; // グローバル変数化
+    window.currentUser = null;
 
     // 1. ログイン処理
     window.signIn = () => {
@@ -364,12 +353,12 @@
         userIcon.style.display = 'block';
         userIcon.src = user.photoURL;
 
-        // ★決済から戻ってきたかどうかの判定★
+        // ★決済から戻ってきたかどうかの判定（DB更新）★
         const urlParams = new URLSearchParams(window.location.search);
         if (urlParams.get('success') === 'true') {
-          // 成功パラメータがついている場合、DBを更新してロック解除！
+          // 成功フラグがあれば、DBを更新してロック解除！
           await unlockFeature(user);
-          // URLを綺麗にする（?success=trueを消す）
+          // URLを綺麗にする
           window.history.replaceState({}, document.title, window.location.pathname);
           alert("ご購入ありがとうございます！\nPro機能が解除されました。");
         }
@@ -406,49 +395,20 @@
       }
     }
 
-    // 4. Stripe決済開始処理
-    // 4. Stripe決済開始処理（診断モード）
-    window.startStripeCheckout = async () => {
-      // 診断1: そもそも関数が動いているか？
-      alert("決済処理を開始します...");
-
+    // 4. Payment Linkへジャンプする処理
+    window.startPaymentLink = () => {
       if (!window.currentUser) {
         alert("先にログインしてください");
         closeModal();
         return;
       }
 
-      try {
-        // 診断2: キーは正しいか？
-        if (!STRIPE_PUBLIC_KEY || !STRIPE_PRICE_ID) {
-          alert("キーまたは価格IDが設定されていません");
-          return;
-        }
+      // ユーザーIDをStripeへ渡すためのクエリパラメータ
+      // StripeのPayment Linksは client_reference_id を付与できるが、ここでは簡易的にIDを付与する
+      const paymentUrl = PAYMENT_LINK_URL + "?client_reference_id=" + window.currentUser.uid;
 
-        const stripe = await stripePromise;
-        if (!stripe) {
-          alert("Stripeの初期化に失敗しました。通信環境を確認してください。");
-          return;
-        }
-
-        alert("Stripeへ移動を試みます...\nID: " + STRIPE_PRICE_ID);
-
-        const { error } = await stripe.redirectToCheckout({
-          lineItems: [{ price: STRIPE_PRICE_ID, quantity: 1 }],
-          mode: 'payment', // ここを間違えて 'subscription' にするとエラーになる商品がある
-          successUrl: window.location.origin + window.location.pathname + '?success=true',
-          cancelUrl: window.location.origin + window.location.pathname,
-          clientReferenceId: window.currentUser.uid
-        });
-
-        // 診断3: Stripeからのエラー返答
-        if (error) {
-          alert("【Stripeエラー】\n" + error.message);
-        }
-      } catch (e) {
-        // 診断4: プログラムのエラー
-        alert("【システムエラー】\n" + e.message);
-      }
+      // 新しいタブで決済画面を開く
+      window.open(paymentUrl, '_blank');
     };
 
 
@@ -582,10 +542,6 @@
     updateShape(297 / 210);
     renderButtons();
     window.addEventListener('resize', () => updateShape(currentRatio));
-
-
-
-
   </script>
 </body>
 
