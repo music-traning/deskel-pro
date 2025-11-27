@@ -1,0 +1,522 @@
+<!DOCTYPE html>
+<html lang="ja">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>デスケル Pro (Pre-Launch)</title>
+
+  <link rel="manifest" href="manifest.json">
+  <link rel="apple-touch-icon" href="icon.png">
+  <meta name="theme-color" content="#000000">
+
+  <style>
+    /* === 全体設定 === */
+    body,
+    html {
+      margin: 0;
+      padding: 0;
+      width: 100%;
+      height: 100%;
+      background-color: #000;
+      overflow: hidden;
+      font-family: sans-serif;
+    }
+
+    .video-container {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      z-index: 1;
+    }
+
+    #camera-video {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      transform-origin: center center;
+      transition: transform 0.1s ease-out;
+    }
+
+    /* 枠線 */
+    #overlay-layer {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      z-index: 2;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      pointer-events: none;
+    }
+
+    #guide-frame {
+      border: 3px solid rgba(255, 255, 255, 0.7);
+      box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.6);
+      width: 80%;
+      height: 0;
+      position: relative;
+      box-sizing: border-box;
+      transition: all 0.3s;
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      grid-template-rows: repeat(4, 1fr);
+    }
+
+    .grid-cell {
+      border: 1px solid rgba(0, 0, 0, 0.8);
+    }
+
+    /* UI周り */
+    .ui-container {
+      position: absolute;
+      bottom: 0;
+      left: 0;
+      width: 100%;
+      z-index: 10;
+      background: linear-gradient(to top, rgba(0, 0, 0, 0.9), transparent);
+      padding-bottom: 20px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 15px;
+      pointer-events: none;
+    }
+
+    .ui-container>* {
+      pointer-events: auto;
+    }
+
+    .zoom-control {
+      width: 80%;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      color: white;
+      font-size: 12px;
+    }
+
+    input[type=range] {
+      flex: 1;
+    }
+
+    .buttons {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      justify-content: center;
+    }
+
+    button.size-btn {
+      padding: 6px 14px;
+      font-size: 12px;
+      border-radius: 15px;
+      border: 1px solid rgba(255, 255, 255, 0.3);
+      background: rgba(50, 50, 50, 0.6);
+      color: white;
+      backdrop-filter: blur(4px);
+      transition: all 0.3s;
+    }
+
+    button.size-btn.active {
+      background: white;
+      color: black;
+      font-weight: bold;
+      border-color: white;
+    }
+
+    /* ロック状態 */
+    button.size-btn.locked {
+      color: #aaa;
+      background: rgba(30, 30, 30, 0.8);
+    }
+
+    #shutter-btn {
+      width: 70px;
+      height: 70px;
+      border-radius: 50%;
+      background-color: white;
+      border: 4px solid #ccc;
+      cursor: pointer;
+      margin-top: 10px;
+      box-shadow: 0 4px 10px rgba(0, 0, 0, 0.5);
+      transition: transform 0.1s;
+    }
+
+    #shutter-btn:active {
+      transform: scale(0.9);
+      background-color: #eee;
+    }
+
+    /* ログインボタン */
+    #user-status {
+      position: absolute;
+      top: 15px;
+      right: 15px;
+      z-index: 20;
+      pointer-events: auto;
+    }
+
+    #btn-login {
+      background: white;
+      color: #333;
+      font-size: 12px;
+      padding: 8px 12px;
+      border-radius: 20px;
+      border: none;
+      font-weight: bold;
+      box-shadow: 0 2px 5px rgba(0, 0, 0, 0.3);
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      cursor: pointer;
+    }
+
+    #user-icon {
+      width: 36px;
+      height: 36px;
+      border-radius: 50%;
+      border: 2px solid white;
+      display: none;
+      box-shadow: 0 2px 5px rgba(0, 0, 0, 0.3);
+      cursor: pointer;
+    }
+
+    /* モーダル共通 */
+    #modal,
+    #save-modal {
+      display: none;
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(0, 0, 0, 0.85);
+      z-index: 100;
+      justify-content: center;
+      align-items: center;
+      color: white;
+      text-align: center;
+    }
+
+    .modal-box {
+      background: #222;
+      padding: 25px;
+      border-radius: 15px;
+      border: 1px solid #444;
+      max-width: 80%;
+    }
+
+    /* 課金ボタン（開発用） */
+    .btn-purchase-demo {
+      background: linear-gradient(90deg, #FFD700, #FFA500);
+      color: black;
+      width: 100%;
+      padding: 12px;
+      border-radius: 20px;
+      font-weight: bold;
+      border: none;
+      margin-top: 15px;
+      cursor: pointer;
+      font-size: 14px;
+    }
+
+    #preview-img {
+      max-width: 100%;
+      max-height: 50vh;
+      border: 2px solid white;
+      margin: 15px 0;
+      display: block;
+    }
+
+    .btn-download {
+      background: white;
+      color: black;
+      padding: 10px 20px;
+      text-decoration: none;
+      border-radius: 20px;
+      font-weight: bold;
+      display: inline-block;
+    }
+
+    .btn-cancel {
+      background: #555;
+      color: white;
+      border: none;
+      padding: 10px 20px;
+      border-radius: 20px;
+      margin-left: 10px;
+      cursor: pointer;
+    }
+
+    canvas {
+      display: none;
+    }
+  </style>
+</head>
+
+<body>
+
+  <div id="user-status">
+    <button id="btn-login" onclick="signIn()">G ログイン</button>
+    <img id="user-icon" src="" alt="user" onclick="alert('ログイン中')">
+  </div>
+
+  <div class="video-container">
+    <video id="camera-video" autoplay playsinline muted></video>
+  </div>
+
+  <div id="overlay-layer">
+    <div id="guide-frame"></div>
+  </div>
+
+  <div class="ui-container">
+    <div class="zoom-control">
+      <span>－</span>
+      <input type="range" id="zoom-slider" min="1.0" max="3.0" step="0.1" value="1.0">
+      <span>＋</span>
+    </div>
+    <div class="buttons" id="btn-container"></div>
+    <button id="shutter-btn"></button>
+  </div>
+
+  <div id="modal">
+    <div class="modal-box">
+      <h3>💎 Proプラン</h3>
+      <p>このサイズを使用するには<br>有料版への登録が必要です。</p>
+
+      <button class="btn-purchase-demo" onclick="simulatePurchase()">
+        【テスト】¥300で購入する<br><span style="font-size:10px; font-weight:normal;">(DB書き換えテスト)</span>
+      </button>
+
+      <div style="margin-top:15px;">
+        <button class="btn-cancel" onclick="closeModal()">キャンセル</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="save-modal">
+    <div class="modal-box">
+      <h3>撮影しました</h3>
+      <img id="preview-img" src="">
+      <p style="font-size:12px; color:#aaa; margin-bottom:15px;">長押しで保存できます</p>
+      <a id="download-link" class="btn-download" download="deskel_art.png" href="#">画像を保存</a>
+      <button class="btn-cancel" onclick="closeSaveModal()">閉じる</button>
+    </div>
+  </div>
+
+  <canvas id="photo-canvas"></canvas>
+
+  <script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-app.js";
+    import { getAuth, signInWithPopup, GoogleAuthProvider, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-auth.js";
+    import { getFirestore, doc, setDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-firestore.js";
+
+    const firebaseConfig = {
+      apiKey: "AIzaSyA_A5BqSP48YSiZU90jFn94g1ccyCnKS1g",
+      authDomain: "deskel-app.firebaseapp.com",
+      projectId: "deskel-app",
+      storageBucket: "deskel-app.firebasestorage.app",
+      messagingSenderId: "1022422619356",
+      appId: "1:1022422619356:web:c1a2008fafcf4499021019"
+    };
+
+    const app = initializeApp(firebaseConfig);
+    const auth = getAuth(app);
+    const db = getFirestore(app);
+    const provider = new GoogleAuthProvider();
+
+    let isUserPremium = false;
+    let currentUser = null;
+
+    window.signIn = () => {
+      signInWithPopup(auth, provider).catch(e => alert(e.message));
+    };
+
+    onAuthStateChanged(auth, (user) => {
+      const loginBtn = document.getElementById('btn-login');
+      const userIcon = document.getElementById('user-icon');
+
+      if (user) {
+        currentUser = user;
+        loginBtn.style.display = 'none';
+        userIcon.style.display = 'block';
+        userIcon.src = user.photoURL;
+
+        onSnapshot(doc(db, "users", user.uid), (docSnap) => {
+          if (docSnap.exists() && docSnap.data().isPremium) {
+            isUserPremium = true;
+          } else {
+            isUserPremium = false;
+          }
+          renderButtons();
+        });
+
+      } else {
+        currentUser = null;
+        isUserPremium = false;
+        loginBtn.style.display = 'flex';
+        userIcon.style.display = 'none';
+        renderButtons();
+      }
+    });
+
+    // === 課金シミュレーション（ここをStripe化する予定） ===
+    window.simulatePurchase = async () => {
+      if (!currentUser) {
+        alert("先にログインしてください");
+        closeModal();
+        return;
+      }
+      try {
+        await setDoc(doc(db, "users", currentUser.uid), {
+          isPremium: true,
+          email: currentUser.email,
+          updatedAt: new Date()
+        }, { merge: true });
+        alert("購入テスト完了：ロックを解除しました");
+        closeModal();
+      } catch (e) {
+        alert("エラー: " + e.message);
+      }
+    };
+
+    // === ロック設定（Trueに戻しました） ===
+    const RATIO_DATA = [
+      { id: 'standard', label: 'A4/B4 (210×297)', ratio: 297 / 210, isPremium: false },
+      { id: 'mokutan', label: '木炭紙 (500×650)', ratio: 650 / 500, isPremium: true }, // 有料
+      { id: 'f-size', label: 'Fサイズ (F6等)', ratio: 410 / 318, isPremium: true }, // 有料
+      { id: 'square', label: '正方形', ratio: 1.00, isPremium: true }  // 有料
+    ];
+
+    let currentRatio = 297 / 210;
+    let currentZoom = 1.0;
+
+    const video = document.getElementById('camera-video');
+    const frame = document.getElementById('guide-frame');
+    const slider = document.getElementById('zoom-slider');
+    const btnContainer = document.getElementById('btn-container');
+    const saveModal = document.getElementById('save-modal');
+    const previewImg = document.getElementById('preview-img');
+    const downloadLink = document.getElementById('download-link');
+    const canvas = document.getElementById('photo-canvas');
+    const shutterBtn = document.getElementById('shutter-btn');
+
+    for (let i = 0; i < 16; i++) {
+      const cell = document.createElement('div');
+      cell.className = 'grid-cell';
+      frame.appendChild(cell);
+    }
+
+    async function startCamera() {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: "environment", width: { ideal: 1920 }, height: { ideal: 1080 } },
+          audio: false
+        });
+        video.srcObject = stream;
+      } catch (e) { console.log("カメラなし"); }
+    }
+
+    function updateShape(ratio) {
+      currentRatio = ratio;
+      const sw = window.innerWidth;
+      const sh = window.innerHeight;
+      let w = sw * 0.85;
+      let h = w * ratio;
+      if (h > sh * 0.75) { h = sh * 0.75; w = h / ratio; }
+      frame.style.width = w + 'px';
+      frame.style.height = h + 'px';
+    }
+
+    slider.addEventListener('input', (e) => {
+      currentZoom = parseFloat(e.target.value);
+      video.style.transform = `scale(${currentZoom})`;
+    });
+
+    function renderButtons() {
+      btnContainer.innerHTML = '';
+
+      RATIO_DATA.forEach((item, i) => {
+        const btn = document.createElement('button');
+        btn.className = 'size-btn';
+
+        const isLocked = item.isPremium && !isUserPremium;
+
+        btn.innerHTML = item.label + (isLocked ? ' 🔒' : '');
+        if (isLocked) btn.classList.add('locked');
+
+        if (Math.abs(item.ratio - currentRatio) < 0.01) {
+          btn.classList.add('active');
+        }
+
+        btn.onclick = () => {
+          if (isLocked) {
+            document.getElementById('modal').style.display = 'flex';
+            return;
+          }
+          document.querySelectorAll('.size-btn').forEach(b => b.classList.remove('active'));
+          btn.classList.add('active');
+          updateShape(item.ratio);
+        };
+
+        btnContainer.appendChild(btn);
+      });
+    }
+
+    window.closeModal = () => { document.getElementById('modal').style.display = 'none'; };
+    window.closeSaveModal = () => { saveModal.style.display = 'none'; };
+
+    shutterBtn.onclick = () => {
+      const vW = video.videoWidth;
+      const vH = video.videoHeight;
+      if (!vW || !vH) return;
+
+      const visibleW = vW / currentZoom;
+      const visibleH = vH / currentZoom;
+      let cropW, cropH;
+      if (visibleH / visibleW > currentRatio) {
+        cropW = visibleW;
+        cropH = visibleW * currentRatio;
+      } else {
+        cropH = visibleH;
+        cropW = visibleH / currentRatio;
+      }
+      const startX = (vW - cropW) / 2;
+      const startY = (vH - cropH) / 2;
+
+      canvas.width = cropW;
+      canvas.height = cropH;
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(video, startX, startY, cropW, cropH, 0, 0, cropW, cropH);
+
+      ctx.strokeStyle = 'rgba(0, 0, 0, 0.8)';
+      ctx.lineWidth = cropW * 0.005;
+      for (let i = 1; i <= 3; i++) {
+        const x = (cropW / 4) * i;
+        ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, cropH); ctx.stroke();
+      }
+      for (let i = 1; i <= 3; i++) {
+        const y = (cropH / 4) * i;
+        ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(cropW, y); ctx.stroke();
+      }
+
+      const dataURL = canvas.toDataURL('image/png');
+      previewImg.src = dataURL;
+      downloadLink.href = dataURL;
+      saveModal.style.display = 'flex';
+    };
+
+    startCamera();
+    updateShape(297 / 210);
+    renderButtons();
+    window.addEventListener('resize', () => updateShape(currentRatio));
+  </script>
+</body>
+
+</html>
