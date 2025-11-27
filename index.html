@@ -407,25 +407,47 @@
     }
 
     // 4. Stripe決済開始処理
+    // 4. Stripe決済開始処理（診断モード）
     window.startStripeCheckout = async () => {
+      // 診断1: そもそも関数が動いているか？
+      alert("決済処理を開始します...");
+
       if (!window.currentUser) {
         alert("先にログインしてください");
         closeModal();
         return;
       }
 
-      const stripe = await stripePromise;
-      const { error } = await stripe.redirectToCheckout({
-        lineItems: [{ price: STRIPE_PRICE_ID, quantity: 1 }],
-        mode: 'payment',
-        // 決済が終わったら、このアプリのURLに戻ってくる（成功フラグ付きで）
-        successUrl: window.location.origin + window.location.pathname + '?success=true',
-        cancelUrl: window.location.origin + window.location.pathname,
-        clientReferenceId: window.currentUser.uid // 誰が買ったかのメモ
-      });
+      try {
+        // 診断2: キーは正しいか？
+        if (!STRIPE_PUBLIC_KEY || !STRIPE_PRICE_ID) {
+          alert("キーまたは価格IDが設定されていません");
+          return;
+        }
 
-      if (error) {
-        alert("決済エラー: " + error.message);
+        const stripe = await stripePromise;
+        if (!stripe) {
+          alert("Stripeの初期化に失敗しました。通信環境を確認してください。");
+          return;
+        }
+
+        alert("Stripeへ移動を試みます...\nID: " + STRIPE_PRICE_ID);
+
+        const { error } = await stripe.redirectToCheckout({
+          lineItems: [{ price: STRIPE_PRICE_ID, quantity: 1 }],
+          mode: 'payment', // ここを間違えて 'subscription' にするとエラーになる商品がある
+          successUrl: window.location.origin + window.location.pathname + '?success=true',
+          cancelUrl: window.location.origin + window.location.pathname,
+          clientReferenceId: window.currentUser.uid
+        });
+
+        // 診断3: Stripeからのエラー返答
+        if (error) {
+          alert("【Stripeエラー】\n" + error.message);
+        }
+      } catch (e) {
+        // 診断4: プログラムのエラー
+        alert("【システムエラー】\n" + e.message);
       }
     };
 
