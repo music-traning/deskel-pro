@@ -4,11 +4,13 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>デスケル Pro (Pre-Launch)</title>
+  <title>デスケル Pro (Stripe Payment)</title>
 
   <link rel="manifest" href="manifest.json">
   <link rel="apple-touch-icon" href="icon.png">
   <meta name="theme-color" content="#000000">
+
+  <script src="https://js.stripe.com/v3/"></script>
 
   <style>
     /* === 全体設定 === */
@@ -187,7 +189,7 @@
       cursor: pointer;
     }
 
-    /* モーダル共通 */
+    /* モーダル */
     #modal,
     #save-modal {
       display: none;
@@ -212,10 +214,10 @@
       max-width: 80%;
     }
 
-    /* 課金ボタン（開発用） */
-    .btn-purchase-demo {
-      background: linear-gradient(90deg, #FFD700, #FFA500);
-      color: black;
+    /* 決済ボタン (Stripeカラーの紫) */
+    .btn-purchase-stripe {
+      background: #635bff;
+      color: white;
       width: 100%;
       padding: 12px;
       border-radius: 20px;
@@ -224,6 +226,7 @@
       margin-top: 15px;
       cursor: pointer;
       font-size: 14px;
+      box-shadow: 0 4px 10px rgba(99, 91, 255, 0.4);
     }
 
     #preview-img {
@@ -264,7 +267,7 @@
 
   <div id="user-status">
     <button id="btn-login" onclick="signIn()">G ログイン</button>
-    <img id="user-icon" src="" alt="user" onclick="alert('ログイン中')">
+    <img id="user-icon" src="" alt="user" onclick="alert('アカウント情報: ' + currentUser?.email)">
   </div>
 
   <div class="video-container">
@@ -290,8 +293,8 @@
       <h3>💎 Proプラン</h3>
       <p>このサイズを使用するには<br>有料版への登録が必要です。</p>
 
-      <button class="btn-purchase-demo" onclick="simulatePurchase()">
-        【テスト】¥300で購入する<br><span style="font-size:10px; font-weight:normal;">(DB書き換えテスト)</span>
+      <button class="btn-purchase-stripe" onclick="startStripeCheckout()">
+        ¥300で購入する<br><span style="font-size:10px; opacity:0.8;">(Stripe決済画面へ移動します)</span>
       </button>
 
       <div style="margin-top:15px;">
@@ -317,6 +320,14 @@
     import { getAuth, signInWithPopup, GoogleAuthProvider, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-auth.js";
     import { getFirestore, doc, setDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-firestore.js";
 
+    // ==========================================
+    // ★ここにあなたのStripe情報を入力してください★
+    // ==========================================
+    const STRIPE_PUBLIC_KEY = "pk_test_xxxxxxxxxxxxxxxxxxxxx"; // pk_test_から始まるキー
+    const STRIPE_PRICE_ID = "price_xxxxxxxxxxxxxxxxxxxxx"; // price_から始まるID
+    // ==========================================
+
+    // Firebase設定
     const firebaseConfig = {
       apiKey: "AIzaSyA_A5BqSP48YSiZU90jFn94g1ccyCnKS1g",
       authDomain: "deskel-app.firebaseapp.com",
@@ -331,23 +342,39 @@
     const db = getFirestore(app);
     const provider = new GoogleAuthProvider();
 
-    let isUserPremium = false;
-    let currentUser = null;
+    // Stripeの準備
+    const stripePromise = Stripe(STRIPE_PUBLIC_KEY);
 
+    let isUserPremium = false;
+    window.currentUser = null; // グローバル変数化
+
+    // 1. ログイン処理
     window.signIn = () => {
       signInWithPopup(auth, provider).catch(e => alert(e.message));
     };
 
-    onAuthStateChanged(auth, (user) => {
+    // 2. 状態監視 & 決済戻り検知
+    onAuthStateChanged(auth, async (user) => {
       const loginBtn = document.getElementById('btn-login');
       const userIcon = document.getElementById('user-icon');
 
       if (user) {
-        currentUser = user;
+        window.currentUser = user;
         loginBtn.style.display = 'none';
         userIcon.style.display = 'block';
         userIcon.src = user.photoURL;
 
+        // ★決済から戻ってきたかどうかの判定★
+        const urlParams = new URLSearchParams(window.location.search);
+        if (urlParams.get('success') === 'true') {
+          // 成功パラメータがついている場合、DBを更新してロック解除！
+          await unlockFeature(user);
+          // URLを綺麗にする（?success=trueを消す）
+          window.history.replaceState({}, document.title, window.location.pathname);
+          alert("ご購入ありがとうございます！\nPro機能が解除されました。");
+        }
+
+        // DB監視
         onSnapshot(doc(db, "users", user.uid), (docSnap) => {
           if (docSnap.exists() && docSnap.data().isPremium) {
             isUserPremium = true;
@@ -358,7 +385,7 @@
         });
 
       } else {
-        currentUser = null;
+        window.currentUser = null;
         isUserPremium = false;
         loginBtn.style.display = 'flex';
         userIcon.style.display = 'none';
@@ -366,32 +393,49 @@
       }
     });
 
-    // === 課金シミュレーション（ここをStripe化する予定） ===
-    window.simulatePurchase = async () => {
-      if (!currentUser) {
+    // 3. データベース更新処理（ロック解除）
+    async function unlockFeature(user) {
+      try {
+        await setDoc(doc(db, "users", user.uid), {
+          isPremium: true,
+          email: user.email,
+          updatedAt: new Date()
+        }, { merge: true });
+      } catch (e) {
+        console.error("DB更新エラー", e);
+      }
+    }
+
+    // 4. Stripe決済開始処理
+    window.startStripeCheckout = async () => {
+      if (!window.currentUser) {
         alert("先にログインしてください");
         closeModal();
         return;
       }
-      try {
-        await setDoc(doc(db, "users", currentUser.uid), {
-          isPremium: true,
-          email: currentUser.email,
-          updatedAt: new Date()
-        }, { merge: true });
-        alert("購入テスト完了：ロックを解除しました");
-        closeModal();
-      } catch (e) {
-        alert("エラー: " + e.message);
+
+      const stripe = await stripePromise;
+      const { error } = await stripe.redirectToCheckout({
+        lineItems: [{ price: STRIPE_PRICE_ID, quantity: 1 }],
+        mode: 'payment',
+        // 決済が終わったら、このアプリのURLに戻ってくる（成功フラグ付きで）
+        successUrl: window.location.origin + window.location.pathname + '?success=true',
+        cancelUrl: window.location.origin + window.location.pathname,
+        clientReferenceId: window.currentUser.uid // 誰が買ったかのメモ
+      });
+
+      if (error) {
+        alert("決済エラー: " + error.message);
       }
     };
 
-    // === ロック設定（Trueに戻しました） ===
+
+    // === 以下、アプリ基本機能 ===
     const RATIO_DATA = [
       { id: 'standard', label: 'A4/B4 (210×297)', ratio: 297 / 210, isPremium: false },
-      { id: 'mokutan', label: '木炭紙 (500×650)', ratio: 650 / 500, isPremium: true }, // 有料
-      { id: 'f-size', label: 'Fサイズ (F6等)', ratio: 410 / 318, isPremium: true }, // 有料
-      { id: 'square', label: '正方形', ratio: 1.00, isPremium: true }  // 有料
+      { id: 'mokutan', label: '木炭紙 (500×650)', ratio: 650 / 500, isPremium: true },
+      { id: 'f-size', label: 'Fサイズ (F6等)', ratio: 410 / 318, isPremium: true },
+      { id: 'square', label: '正方形', ratio: 1.00, isPremium: true }
     ];
 
     let currentRatio = 297 / 210;
@@ -516,10 +560,6 @@
     updateShape(297 / 210);
     renderButtons();
     window.addEventListener('resize', () => updateShape(currentRatio));
-
-    const STRIPE_PUBLIC_KEY = "pk_test_51SY9eUHNwKy1YooCBCl8mWkplg1n1y9TjsLNI8XFdydQYUi8daKjKzq710C9u4XsMp11cZHXCBRp8VsbiC6TKskl00xXdMFKCx";
-    const STRIPE_PRICE_ID = "price_1SY9mXHNwKy1YooCBZuq6doP";
-
   </script>
 </body>
 
